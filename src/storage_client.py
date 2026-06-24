@@ -82,13 +82,12 @@ def build_storage_config_from_env() -> StorageConfig:
     account_url = os.getenv("AZURE_STORAGE_ACCOUNT_URL", "")
     container_name = os.getenv("AZURE_STORAGE_CONTAINER", "")
     credential = os.getenv("AZURE_STORAGE_CREDENTIAL")
-    metadata_sha_key = os.getenv("BLOB_METADATA_SHA_KEY", "github_sha")
 
     return StorageConfig(
         account_url=account_url,
         container_name=container_name,
         credential=credential,
-        metadata_sha_key=metadata_sha_key,
+        metadata_sha_key="github_sha",
     )
 
 
