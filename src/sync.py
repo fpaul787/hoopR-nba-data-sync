@@ -36,18 +36,41 @@ def _parse_sync_max_files(value: str | None) -> int | None:
 def _parse_base_paths() -> list[str]:
     """Resolve one or more GitHub base paths from environment variables."""
 
+    def _normalize_and_dedupe_paths(raw_paths: list[str]) -> list[str]:
+        normalized_paths: list[str] = []
+        seen_paths: set[str] = set()
+
+        for raw_path in raw_paths:
+            normalized_path = raw_path.strip().strip("/")
+            if not normalized_path or normalized_path in seen_paths:
+                continue
+
+            seen_paths.add(normalized_path)
+            normalized_paths.append(normalized_path)
+
+        return normalized_paths
+
     base_paths_env = os.getenv("GITHUB_BASE_PATHS")
     if base_paths_env and base_paths_env.strip():
-        parsed_paths = [
-            path.strip().strip("/")
-            for path in base_paths_env.split(",")
-            if path.strip()
-        ]
+        parsed_paths = _normalize_and_dedupe_paths(base_paths_env.split(","))
         if parsed_paths:
             return parsed_paths
 
+        raise ValueError(
+            "Invalid GITHUB_BASE_PATHS: no valid non-empty paths after normalization. "
+            "Provide one or more comma-separated values such as "
+            "'nba/team_box/parquet,nba/player_box/parquet'."
+        )
+
     fallback_path = os.getenv("GITHUB_BASE_PATH", "nba/team_box/parquet")
-    return [fallback_path.strip().strip("/")]
+    parsed_fallback = _normalize_and_dedupe_paths([fallback_path])
+    if parsed_fallback:
+        return parsed_fallback
+
+    raise ValueError(
+        "Invalid GITHUB_BASE_PATH: no valid non-empty path after normalization. "
+        "Example: 'nba/team_box/parquet'."
+    )
 
 
 def _collect_files_for_paths(
