@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 import os
 from typing import Any
 
@@ -23,7 +23,12 @@ class GitHubParquetFile:
 	download_url: str
 
 	def to_dict(self) -> dict[str, str]:
-		return asdict(self)
+		return {
+			"name": self.name,
+			"path": self.path,
+			"sha": self.sha,
+			"download_url": self.download_url,
+		}
 
 
 class GitHubClient:
@@ -49,9 +54,14 @@ class GitHubClient:
 		response.raise_for_status()
 		return response.json()
 
-	def get_branch_commit_sha(self, branch: str = "main") -> str:
-		data = self._get_json(f"{GITHUB_API_BASE}/repos/{self.owner}/{self.repo}/branches/{branch}")
-		return data["commit"]["sha"]
+	def _list_contents(self, path: str, branch: str) -> list[dict[str, Any]]:
+		encoded_path = path.strip("/")
+		url = f"{GITHUB_API_BASE}/repos/{self.owner}/{self.repo}/contents/{encoded_path}?ref={branch}"
+		data = self._get_json(url)
+
+		if isinstance(data, list):
+			return data
+		return [data]
 
 	def list_parquet_files(
 		self,
@@ -60,42 +70,46 @@ class GitHubClient:
 	) -> list[GitHubParquetFile]:
 		"""Return all parquet files under a path in the repository."""
 
-		commit_sha = self.get_branch_commit_sha(branch=branch)
-		tree_data = self._get_json(
-			f"{GITHUB_API_BASE}/repos/{self.owner}/{self.repo}/git/trees/{commit_sha}?recursive=1"
-		)
-
-		normalized_base = base_path.strip("/") + "/"
 		parquet_files: list[GitHubParquetFile] = []
+		pending_paths = [base_path.strip("/")]
 
-		for item in tree_data.get("tree", []):
-			path = item.get("path")
-			if not path:
-				continue
-			if item.get("type") != "blob":
-				continue
-			if not path.startswith(normalized_base):
-				continue
-			if not path.endswith(".parquet"):
-				continue
+		while pending_paths:
+			current_path = pending_paths.pop()
+			entries = self._list_contents(path=current_path, branch=branch)
 
-			parquet_files.append(
-				GitHubParquetFile(
-					name=path.rsplit("/", 1)[-1],
-					path=path,
-					sha=item["sha"],
-					download_url=f"{RAW_BASE}/{self.owner}/{self.repo}/{branch}/{path}",
+			for entry in entries:
+				entry_type = entry.get("type")
+				entry_path = entry.get("path")
+				if not entry_path:
+					continue
+
+				if entry_type == "dir":
+					pending_paths.append(entry_path)
+					continue
+
+				if entry_type != "file":
+					continue
+				if not entry_path.endswith(".parquet"):
+					continue
+
+				parquet_files.append(
+					GitHubParquetFile(
+						name=entry_path.rsplit("/", 1)[-1],
+						path=entry_path,
+						sha=entry["sha"],
+						download_url=entry.get("download_url")
+						or f"{RAW_BASE}/{self.owner}/{self.repo}/{branch}/{entry_path}",
+					)
 				)
-			)
 
 		parquet_files.sort(key=lambda file: file.path)
 		return parquet_files
 
 
 def build_default_client() -> GitHubClient:
-	"""Create a client configured from environment variables."""
+    """Create a client configured from environment variables."""
 
-	owner = os.getenv("GITHUB_OWNER", "sportsdataverse")
-	repo = os.getenv("GITHUB_REPO", "hoopR-nba-data")
-	token = os.getenv("GITHUB_TOKEN")
-	return GitHubClient(owner=owner, repo=repo, token=token)
+    owner = os.getenv("GITHUB_OWNER", "sportsdataverse")
+    repo = os.getenv("GITHUB_REPO", "hoopR-nba-data")
+    token = os.getenv("GITHUB_TOKEN")
+    return GitHubClient(owner=owner, repo=repo, token=token)
