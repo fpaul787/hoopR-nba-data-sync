@@ -1,0 +1,34 @@
+name: Sync NBA Parquet Data
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_OWNER: sportsdataverse
+      GITHUB_REPO: hoopR-nba-data
+      GITHUB_BRANCH: main
+      GITHUB_BASE_PATHS: nba/team_box/parquet,nba/player_box/parquet,nba/schedules/parquet
+      AZURE_STORAGE_CONTAINER: hoopr-nba-storage
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+        run: python src/sync.py
