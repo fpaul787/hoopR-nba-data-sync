@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import time
+from typing import Any
 
 from github_client import build_default_client
 import requests
@@ -13,10 +14,43 @@ import requests
 from storage_client import build_storage_client_from_env
 
 
-def _download_file_content(url: str, timeout: int = 120) -> bytes:
-    response = requests.get(url, timeout=timeout)
-    response.raise_for_status()
-    return response.content
+def _parse_sync_max_files(value: str | None) -> int | None:
+    if value is None or value.strip() == "":
+        return None
+
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid SYNC_MAX_FILES='{value}'. Expected a positive integer."
+        ) from exc
+
+    if parsed <= 0:
+        raise ValueError(
+            f"Invalid SYNC_MAX_FILES='{value}'. Expected a positive integer."
+        )
+
+    return parsed
+
+
+def _download_and_upload_file(
+    storage_client: Any,
+    *,
+    blob_name: str,
+    download_url: str,
+    github_sha: str,
+    timeout: int = 120,
+) -> None:
+    # Stream payload to avoid loading whole parquet files into memory.
+    with requests.get(download_url, timeout=timeout, stream=True) as response:
+        response.raise_for_status()
+        response.raw.decode_content = True
+        storage_client.upload_with_github_sha(
+            blob_name=blob_name,
+            content=response.raw,
+            github_sha=github_sha,
+            overwrite=True,
+        )
 
 
 def main() -> None:
@@ -26,7 +60,7 @@ def main() -> None:
     branch = os.getenv("GITHUB_BRANCH", "main")
     base_path = os.getenv("GITHUB_BASE_PATH", "nba/team_box/parquet")
     max_files_env = os.getenv("SYNC_MAX_FILES")
-    max_files = int(max_files_env) if max_files_env else None
+    max_files = _parse_sync_max_files(max_files_env)
 
     github_client = build_default_client()
     storage_client = build_storage_client_from_env()
@@ -47,12 +81,11 @@ def main() -> None:
 
         try:
             if not storage_client.blob_exists(blob_name):
-                content = _download_file_content(source_file.download_url)
-                storage_client.upload_with_github_sha(
+                _download_and_upload_file(
+                    storage_client,
                     blob_name=blob_name,
-                    content=content,
+                    download_url=source_file.download_url,
                     github_sha=source_file.sha,
-                    overwrite=True,
                 )
                 new_files_uploaded += 1
                 logging.info(
@@ -74,12 +107,11 @@ def main() -> None:
                 )
                 continue
 
-            content = _download_file_content(source_file.download_url)
-            storage_client.upload_with_github_sha(
+            _download_and_upload_file(
+                storage_client,
                 blob_name=blob_name,
-                content=content,
+                download_url=source_file.download_url,
                 github_sha=source_file.sha,
-                overwrite=True,
             )
             updated_files_uploaded += 1
             logging.info(
