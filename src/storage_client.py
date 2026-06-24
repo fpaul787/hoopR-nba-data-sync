@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+from typing import BinaryIO
 
 from azure.core.exceptions import ResourceNotFoundError
 from azure.storage.blob import BlobServiceClient
@@ -65,7 +66,7 @@ class StorageClient:
         return metadata.get(self.metadata_sha_key)
 
     def upload_blob_bytes(
-        self, blob_name: str, content: bytes, overwrite: bool = True
+        self, blob_name: str, content: bytes | BinaryIO, overwrite: bool = True
     ) -> None:
         """Upload bytes to blob storage."""
 
@@ -79,15 +80,15 @@ class StorageClient:
     def upload_with_github_sha(
         self,
         blob_name: str,
-        content: bytes,
+        content: bytes | BinaryIO,
         github_sha: str,
         overwrite: bool = True,
     ) -> None:
         """Upload content and apply SHA metadata as one sync operation."""
 
-        self.upload_blob_bytes(blob_name=blob_name, content=content, overwrite=overwrite)
         metadata = self.get_blob_metadata(blob_name)
         metadata[self.metadata_sha_key] = github_sha
+        self.upload_blob_bytes(blob_name=blob_name, content=content, overwrite=overwrite)
         self.set_blob_metadata(blob_name=blob_name, metadata=metadata)
 
     def map_source_path_to_blob_name(
