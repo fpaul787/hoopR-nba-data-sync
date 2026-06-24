@@ -33,6 +33,40 @@ def _parse_sync_max_files(value: str | None) -> int | None:
     return parsed
 
 
+def _parse_base_paths() -> list[str]:
+    """Resolve one or more GitHub base paths from environment variables."""
+
+    base_paths_env = os.getenv("GITHUB_BASE_PATHS")
+    if base_paths_env and base_paths_env.strip():
+        parsed_paths = [
+            path.strip().strip("/")
+            for path in base_paths_env.split(",")
+            if path.strip()
+        ]
+        if parsed_paths:
+            return parsed_paths
+
+    fallback_path = os.getenv("GITHUB_BASE_PATH", "nba/team_box/parquet")
+    return [fallback_path.strip().strip("/")]
+
+
+def _collect_files_for_paths(
+    github_client: Any,
+    *,
+    base_paths: list[str],
+    branch: str,
+) -> list[Any]:
+    """Aggregate parquet files for multiple source roots, deduplicated by path."""
+
+    files_by_path: dict[str, Any] = {}
+    for base_path in base_paths:
+        discovered_files = github_client.list_parquet_files(base_path=base_path, branch=branch)
+        for discovered_file in discovered_files:
+            files_by_path[discovered_file.path] = discovered_file
+
+    return sorted(files_by_path.values(), key=lambda file: file.path)
+
+
 def _download_and_upload_file(
     storage_client: Any,
     *,
@@ -58,18 +92,23 @@ def main() -> None:
 
     start_time = time.perf_counter()
     branch = os.getenv("GITHUB_BRANCH", "main")
-    base_path = os.getenv("GITHUB_BASE_PATH", "nba/team_box/parquet")
+    base_paths = _parse_base_paths()
     max_files_env = os.getenv("SYNC_MAX_FILES")
     max_files = _parse_sync_max_files(max_files_env)
 
     github_client = build_default_client()
     storage_client = build_storage_client_from_env()
 
-    files = github_client.list_parquet_files(base_path=base_path, branch=branch)
+    files = _collect_files_for_paths(github_client, base_paths=base_paths, branch=branch)
     if max_files is not None:
         files = files[:max_files]
 
-    logging.info("discovered_parquet_files=%s base_path=%s branch=%s", len(files), base_path, branch)
+    logging.info(
+        "discovered_parquet_files=%s base_paths=%s branch=%s",
+        len(files),
+        base_paths,
+        branch,
+    )
 
     new_files_uploaded = 0
     updated_files_uploaded = 0
