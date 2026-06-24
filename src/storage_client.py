@@ -12,9 +12,8 @@ from dotenv import load_dotenv
 class StorageConfig:
     """Runtime configuration for Azure Blob storage access."""
 
-    account_url: str
+    connection_string: str
     container_name: str
-    credential: str | None = None
     metadata_sha_key: str = "github_sha"
 
 
@@ -23,9 +22,8 @@ class StorageClient:
 
     def __init__(self, config: StorageConfig) -> None:
         self.config = config
-        self.account_url = config.account_url
+        self.connection_string = config.connection_string
         self.container_name = config.container_name
-        self.credential = config.credential
         self.metadata_sha_key = config.metadata_sha_key
 
     def blob_exists(self, blob_name: str) -> bool:
@@ -79,14 +77,12 @@ def build_storage_config_from_env() -> StorageConfig:
 
     load_dotenv()
 
-    account_url = os.getenv("AZURE_STORAGE_ACCOUNT_URL", "")
+    connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
     container_name = os.getenv("AZURE_STORAGE_CONTAINER", "")
-    credential = os.getenv("AZURE_STORAGE_CREDENTIAL")
 
     return StorageConfig(
-        account_url=account_url,
+        connection_string=connection_string,
         container_name=container_name,
-        credential=credential,
         metadata_sha_key="github_sha",
     )
 
