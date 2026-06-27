@@ -2,6 +2,11 @@ name: Sync NBA Parquet Data
 
 on:
   workflow_dispatch:
+    inputs:
+      sync_max_files:
+        description: Optional cap for quick test runs
+        required: false
+        type: string
   schedule:
     - cron: "0 */6 * * *"
 
@@ -14,18 +19,28 @@ jobs:
       GITHUB_BRANCH: main
       GITHUB_BASE_PATHS: nba/team_box/parquet,nba/player_box/parquet,nba/schedules/parquet
       AZURE_STORAGE_CONTAINER: hoopr-nba-storage
+      SYNC_MAX_FILES: ${{ github.event.inputs.sync_max_files || ''}}
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Print environment variables
+        run: |
+          echo "GITHUB_OWNER: $GITHUB_OWNER"
+          echo "GITHUB_REPO: $GITHUB_REPO"
+          echo "GITHUB_BRANCH: $GITHUB_BRANCH"
+          echo "GITHUB_BASE_PATHS: $GITHUB_BASE_PATHS"
+          echo "AZURE_STORAGE_CONTAINER: $AZURE_STORAGE_CONTAINER"
+          echo "SYNC_MAX_FILES: $SYNC_MAX_FILES"
 
       - name: Run sync
         env:
