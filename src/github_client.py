@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+import time
 from typing import Any
 
 from dotenv import load_dotenv
@@ -12,6 +13,7 @@ import requests
 
 GITHUB_API_BASE = "https://api.github.com"
 RAW_BASE = "https://raw.githubusercontent.com"
+RETRYABLE_STATUS_CODES = {500, 502, 503, 504}
 
 
 @dataclass(frozen=True)
@@ -35,10 +37,20 @@ class GitHubParquetFile:
 class GitHubClient:
     """Thin wrapper around the GitHub REST API."""
 
-    def __init__(self, owner: str, repo: str, token: str | None = None, timeout: int = 30) -> None:
+    def __init__(
+        self,
+        owner: str,
+        repo: str,
+        token: str | None = None,
+        timeout: int = 30,
+        retry_attempts: int = 3,
+        retry_delay_seconds: float = 2.0,
+    ) -> None:
         self.owner = owner
         self.repo = repo
         self.timeout = timeout
+        self.retry_attempts = retry_attempts
+        self.retry_delay_seconds = retry_delay_seconds
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -50,8 +62,28 @@ class GitHubClient:
         if token:
             self.session.headers["Authorization"] = f"Bearer {token}"
 
+    def _request_with_retry(self, url: str) -> requests.Response:
+        last_response: requests.Response | None = None
+
+        for attempt in range(1, self.retry_attempts + 1):
+            response = self.session.get(url, timeout=self.timeout)
+            last_response = response
+
+            if response.status_code in RETRYABLE_STATUS_CODES and attempt < self.retry_attempts:
+                time.sleep(self.retry_delay_seconds)
+                continue
+
+            response.raise_for_status()
+            return response
+
+        if last_response is None:
+            raise RuntimeError("GitHub request did not return a response")
+
+        last_response.raise_for_status()
+        return last_response
+
     def _get_json(self, url: str) -> Any:
-        response = self.session.get(url, timeout=self.timeout)
+        response = self._request_with_retry(url)
         response.raise_for_status()
         return response.json()
 
