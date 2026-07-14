@@ -14,6 +14,9 @@ import requests
 from storage_client import build_storage_client_from_env
 
 
+RETRYABLE_STATUS_CODES = {500, 502, 503, 504}
+
+
 def _configure_logging() -> None:
     """Configure app logging while suppressing noisy SDK HTTP wire logs."""
 
@@ -115,17 +118,34 @@ def _download_and_upload_file(
     download_url: str,
     github_sha: str,
     timeout: int = 120,
+    retry_attempts: int = 3,
+    retry_delay_seconds: float = 60.0,
 ) -> None:
     # Stream payload to avoid loading whole parquet files into memory.
-    with requests.get(download_url, timeout=timeout, stream=True) as response:
-        response.raise_for_status()
-        response.raw.decode_content = True
-        storage_client.upload_with_github_sha(
-            blob_name=blob_name,
-            content=response.raw,
-            github_sha=github_sha,
-            overwrite=True,
-        )
+    last_response: requests.Response | None = None
+
+    for attempt in range(1, retry_attempts + 1):
+        with requests.get(download_url, timeout=timeout, stream=True) as response:
+            last_response = response
+
+            if response.status_code in RETRYABLE_STATUS_CODES and attempt < retry_attempts:
+                time.sleep(retry_delay_seconds)
+                continue
+
+            response.raise_for_status()
+            response.raw.decode_content = True
+            storage_client.upload_with_github_sha(
+                blob_name=blob_name,
+                content=response.raw,
+                github_sha=github_sha,
+                overwrite=True,
+            )
+            return
+
+    if last_response is None:
+        raise RuntimeError("GitHub download did not return a response")
+
+    last_response.raise_for_status()
 
 
 def main() -> None:
